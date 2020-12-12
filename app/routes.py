@@ -1,6 +1,6 @@
 from app import app
 from app import db
-from app.models import Guild, GuildQuery, Guild_player, Guild_playerQuery
+from app.models import Guild, GuildQuery, Guild_player, Guild_playerQuery, Character_equipment, Character_equipmentQuery
 from flask import Flask, render_template, redirect, request, jsonify, make_response
 
 import requests
@@ -30,6 +30,14 @@ def get_player_from_guild(realm, guild):
   else:
     return make_response(jsonify(character), 200)
 
+@app.route("/guild/<string:realm>/<string:guild>/gear")
+def get_player_gear_from_guild(realm, guild):
+  characters_gear = Character_equipmentQuery.get_gear_from_guild_player(realm, guild)
+
+  if characters_gear == None or len(characters_gear) == 0:
+    return make_response('No Characters found', 404)
+  else:
+    return make_response(jsonify(characters_gear), 200)
 
 def refresh_guild(guild_data, last_modified, recorded_modified):
   if recorded_modified == 0: # INSERT INTO
@@ -40,16 +48,41 @@ def refresh_guild(guild_data, last_modified, recorded_modified):
     guild = Guild(guild_data['id'], guild_data['realm'], guild_data['name'], guild_data['faction'], last_modified)
     GuildQuery.update_guild(guild)
 
-def refresh_guild_roster(guild_roster, guild_id, last_modified, recorded_modified):
-  if recorded_modified > last_modified:
-    return True
+def calculate_char_gs(gear_data):
+  dont_count = ['SHIRT', 'TABARD']
   
+  gs = 0
+  use_two_handed = True
+  for item in gear_data:
+    if item['slot'] not in dont_count:
+      gs += item['level']
+    if item['slot'] == 'OFF_HAND':
+      use_two_handed = False
+
+  if use_two_handed:
+    gs = gs / 15
+  else:
+    gs = gs / 16
+
+  return float("{:.2f}".format(gs))
+
+
+def refresh_guild_roster(guild_roster, guild_id, token): # First assume EVERY char is ALWAYS new. Adding checks later
   for char in guild_roster:
-    if recorded_modified == 0: # INSERT INTO
-      char = Guild_player(char['id'], guild_id, char['name'], char['level'], char['_class'], char['race'], char['rank'], last_modified)
-      db.session.add(char)
-    elif recorded_modified + refresh_interval < last_modified:
-      print("asd")
+    gear_data, char_last_modified = update_character_equipment(char['realm'], char['name'], token)
+    
+    if gear_data is None:
+      continue
+
+    char_gs = calculate_char_gs(gear_data)
+
+    for item in gear_data:
+      piece = Character_equipment(char['id'], item)
+      db.session.add(piece)
+
+    player = Guild_player(char, guild_id, char_last_modified)
+    player.gear_score = char_gs
+    db.session.add(player)
 
   db.session.commit()
 
@@ -65,7 +98,14 @@ def refresh_everything():
   last_modified = GuildQuery.get_last_modified(guild_roster['guild']['id'])
 
   refresh_guild(guild_roster['guild'], guild_roster_lm, last_modified)
-  refresh_guild_roster(guild_roster['character'], guild_roster['guild']['id'], guild_roster_lm, 0)#last_modified)
+  refresh_guild_roster(guild_roster['character'], guild_roster['guild']['id'], access_token)   #guild_roster['guild']['id'], guild_roster_lm, 0)#last_modified)
+
+
+
+
+
+
+
 
   # Schauen ob Gilde bereits vorhanden, wenn ja:
   # Vergleichen, ob LM größer als der in DB ist
@@ -92,7 +132,7 @@ def update_guild_roster(realm, name, token):
 
   chars = []
   for member in res['members']:
-    char = {'id': '', 'leve': '', 'name': '', '_class': '', 'realm': '', 'rank': '', 'race': ''}
+    char = dict()
     char['id'] = member['character']['id']
     char['level'] = member['character']['level']
     char['name'] = member['character']['name']
@@ -105,3 +145,26 @@ def update_guild_roster(realm, name, token):
   data['character'] = chars
 
   return (data, convert_datetime(response.headers['Date']))
+
+def update_character_equipment(realm, character, token):
+  response = requests.get(f'https://eu.api.blizzard.com/profile/wow/character/{realm}/{character.lower()}/equipment?namespace=profile-eu&locale=de_DE&access_token={token}')
+
+  res = response.json()
+  items = []
+
+  if not 'equipped_items' in res:
+    print(character)
+    return None, None
+
+  for char_item in res['equipped_items']:
+    item = dict()
+    item['id'] = char_item['item']['id']
+    item['slot'] = char_item['slot']['type']
+    item['quality'] = char_item['quality']['type']
+    item['name'] = char_item['name']
+    item['itemClass'] = char_item['item_class']['name']
+    item['itemSubclass'] = char_item['item_subclass']['name']
+    item['level'] = char_item['level']['value']
+    items.append(item)
+
+  return (items, convert_datetime(response.headers['Last-Modified']))
