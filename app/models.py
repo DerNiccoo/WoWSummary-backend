@@ -47,7 +47,8 @@ class Guild_player(db.Model):
   player_id: int = db.Column(db.Integer, primary_key=True)
   guild_id: int = db.Column(db.Integer, db.ForeignKey('guild.guild_id'))
   guild = db.relationship("Guild", back_populates="player", foreign_keys=[guild_id])
-  gear = db.relationship("Character_equipment", back_populates="player_gear")
+  gear = db.relationship("Character_equipment", back_populates="player_gear", cascade="all, delete")
+  dungeon = db.relationship("Character_dungeon", back_populates="player_dungeon", cascade="all, delete")
   name: str = db.Column(db.String(32), index=True)
   level: int = db.Column(db.Integer)
   playable_class: str = db.Column(db.String(32))
@@ -82,6 +83,14 @@ class Guild_playerQuery(object):
       .all()
     return character
 
+  @staticmethod
+  def get_all_guild_id_player(guild_id):
+    character = Guild_player.query\
+      .join(Guild, Guild.guild_id == Guild_player.guild_id)\
+      .filter(Guild.guild_id == guild_id)\
+      .all()
+    return character
+
 
 @dataclass
 class Character_equipment(db.Model):
@@ -96,6 +105,9 @@ class Character_equipment(db.Model):
   level: int = db.Column(db.Integer)
   name: str = db.Column(db.String(128))
   quality: str = db.Column(db.String(32))
+  socket: int = db.Column(db.Integer)
+  enchantments: int = db.Column(db.Integer)
+  legy_spell: int = db.Column(db.Integer)
   UniqueConstraint(item_id, slot, player_id)
   
 
@@ -109,6 +121,15 @@ class Character_equipment(db.Model):
     self.quality = gear_dict['quality']
     self.slot = gear_dict['slot']
 
+    if 'enchantments' in gear_dict:
+      self.enchantments = gear_dict['enchantments']
+
+    if 'socket' in gear_dict:
+      self.socket = gear_dict['socket']
+
+    if 'legy_spell' in gear_dict:
+      self.legy_spell = gear_dict['legy_spell']
+
 class Character_equipmentQuery(object):
   @staticmethod
   def get_gear_from_guild_player(realm, guild):
@@ -117,6 +138,39 @@ class Character_equipmentQuery(object):
     res = []
     for char in character:
       gear_list = Character_equipment.query.filter(Character_equipment.player_id == char.player_id).all()
-      res.append({'name': char.name, 'gear_score': char.gear_score, 'items': gear_list})
+      res.append({'name': char.name, 'char_id': char.player_id, 'class': char.playable_class, 'gear_score': char.gear_score, 'items': gear_list})
+
+    return res
+
+@dataclass
+class Character_dungeon(db.Model):
+  dungeon_id: int = db.Column(db.Integer, primary_key=True)
+  dungeon_period: int = db.Column(db.Integer, primary_key=True)
+  player_id: int = db.Column(db.Integer, db.ForeignKey('guild_player.player_id'), primary_key=True)
+  player_dungeon = db.relationship("Guild_player", back_populates="dungeon", foreign_keys=[player_id])
+
+  intime: bool = db.Column(db.Boolean)
+  dungeon: str = db.Column(db.String(32))
+  keystone_level: int = db.Column(db.Integer)
+  duration: int = db.Column(db.Integer)
+
+  def __init__(self, dungeon_dict):
+    self.player_id = dungeon_dict['player_id']
+    self.dungeon_period = dungeon_dict['dungeon_period']
+    self.dungeon_id = dungeon_dict['dungeon_id']
+    self.intime = dungeon_dict['intime']
+    self.dungeon = dungeon_dict['dungeon']
+    self.keystone_level = dungeon_dict['keystone_level']
+    self.duration = dungeon_dict['duration']
+
+class Character_dungeonQuery(object):
+  @staticmethod
+  def get_dungeons_from_guild_player(realm, guild):
+    character = Guild_playerQuery.get_all_guild_player(realm, guild)
+
+    res = []
+    for char in character:
+      dungeon_list = Character_dungeon.query.filter(Character_dungeon.player_id == char.player_id).all()
+      res.append({'name': char.name, 'char_id': char.player_id, 'class': char.playable_class, 'gear_score': char.gear_score, 'dungeon_list': dungeon_list})
 
     return res
