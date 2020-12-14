@@ -1,6 +1,6 @@
 from app import app
 from app import db
-from app.models import Guild, GuildQuery, Guild_player, Guild_playerQuery, Character_equipment, Character_equipmentQuery, Character_dungeon, Character_dungeonQuery
+from app.models import Guild, GuildQuery, Guild_player, Guild_playerQuery, Character_equipment, Character_equipmentQuery, Character_dungeon, Character_dungeonQuery, Character_mount, Character_mountQuery
 from flask import Flask, render_template, redirect, request, jsonify, make_response
 
 import requests
@@ -52,6 +52,29 @@ def get_player_dungeon_from_guild(realm, guild):
 
     return make_response(jsonify(result), 200)
 
+@app.route("/guild/<string:realm>/<string:guild>/collection/mounts/overview")
+def get_player_mounts_from_guild(realm, guild):
+  character = Character_mountQuery.get_mounts_from_guild_player(realm, guild)
+  
+  if character == None or len(character) == 0:
+    return make_response('No Character found', 404)
+  else:
+    result = []
+
+    for char in character:
+      container = dict()
+      container['char_id'] = char['char_id']
+      container['total'] = 0
+      container['usable'] = 0
+
+      for mount in char['mount_list']:
+        if mount.useable:
+          container['usable'] += 1
+        container['total'] += 1
+      
+      result.append(container)
+
+    return make_response(jsonify(result), 200)
 
 #region Gear Sektion
 
@@ -185,12 +208,21 @@ def refresh_guild_roster(guild_roster, guild_id, token):
 
     ### End of Gear
 
+    ### Dungeons
     dungeons = update_character_mythic_plus(char['realm'], char['name'], token)
     if dungeons is not None:
       for dungeon in dungeons:
         dung = Character_dungeon(dungeon)
         db.session.add(dung)
 
+    ### End of Dungeons
+    ### Collection Mounts
+    mounts = update_character_collection_mounts(char['realm'], char['name'], token)
+    if mounts is not None:
+      for mount in mounts:
+        horse = Character_mount(char['id'], mount)
+        db.session.add(horse)
+    ### End of Collection Mounts
 
     db.session.add(player)
 
@@ -320,6 +352,27 @@ def update_character_mythic_plus(realm, character, token):
     data['dungeon_id'] = run['dungeon']['id']
     data['player_id'] = res['character']['id']
     data['dungeon_period'] = res['current_period']['period']['id']
+    result.append(data)
+
+  return result
+
+def update_character_collection_mounts(realm, character, token):
+  response = requests.get(f'https://eu.api.blizzard.com/profile/wow/character/{realm}/{character.lower()}/collections/mounts?namespace=profile-eu&locale=de_DE&access_token={token}')
+  res = response.json()
+
+  if 'mounts' not in res:
+    return None
+
+  result = []
+  
+  for iteration in res['mounts']:
+    if 'is_character_specific' in iteration:
+      continue
+
+    data = dict()
+    data['name'] = iteration['mount']['name']
+    data['mount_id'] = iteration['mount']['id']
+    data['useable'] = iteration['is_useable']
     result.append(data)
 
   return result

@@ -49,6 +49,7 @@ class Guild_player(db.Model):
   guild = db.relationship("Guild", back_populates="player", foreign_keys=[guild_id])
   gear = db.relationship("Character_equipment", back_populates="player_gear", cascade="all, delete")
   dungeon = db.relationship("Character_dungeon", back_populates="player_dungeon", cascade="all, delete")
+  mount = db.relationship("Character_mount", back_populates="player_mount", cascade="all, delete")
   name: str = db.Column(db.String(32), index=True)
   level: int = db.Column(db.Integer)
   playable_class: str = db.Column(db.String(32))
@@ -150,7 +151,7 @@ class Character_dungeon(db.Model):
   player_dungeon = db.relationship("Guild_player", back_populates="dungeon", foreign_keys=[player_id])
 
   intime: bool = db.Column(db.Boolean)
-  dungeon: str = db.Column(db.String(32))
+  dungeon: str = db.Column(db.String(128))
   keystone_level: int = db.Column(db.Integer)
   duration: int = db.Column(db.Integer)
 
@@ -172,5 +173,32 @@ class Character_dungeonQuery(object):
     for char in character:
       dungeon_list = Character_dungeon.query.filter(Character_dungeon.player_id == char.player_id).all()
       res.append({'name': char.name, 'char_id': char.player_id, 'class': char.playable_class, 'gear_score': char.gear_score, 'dungeon_list': dungeon_list})
+
+    return res
+
+@dataclass
+class Character_mount(db.Model):
+  mount_id: int = db.Column(db.Integer, primary_key=True)
+  player_id: int = db.Column(db.Integer, db.ForeignKey('guild_player.player_id'), primary_key=True)
+  player_mount = db.relationship("Guild_player", back_populates="mount", foreign_keys=[player_id])
+
+  useable: bool = db.Column(db.Boolean)
+  name: str = db.Column(db.String(64))
+
+  def __init__(self, player_id, mount_dict):
+    self.player_id = player_id
+    self.mount_id = mount_dict['mount_id']
+    self.useable = mount_dict['useable']
+    self.name = mount_dict['name']
+
+class Character_mountQuery(object):
+  @staticmethod
+  def get_mounts_from_guild_player(realm, guild):
+    character = Guild_playerQuery.get_all_guild_player(realm, guild)
+
+    res = []
+    for char in character:
+      mount_list = Character_mount.query.filter(Character_mount.player_id == char.player_id).all()
+      res.append({'name': char.name, 'char_id': char.player_id, 'class': char.playable_class, 'gear_score': char.gear_score, 'mount_list': mount_list})
 
     return res
