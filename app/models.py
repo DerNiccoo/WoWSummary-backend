@@ -57,6 +57,14 @@ class Guild_player(db.Model):
   rank: int = db.Column(db.Integer)
   last_modified: int = db.Column(db.Integer)
   gear_score: float = db.Column(db.Float)
+  active_spec_name: str = db.Column(db.String(32))
+  active_spec_role: str = db.Column(db.String(32))
+  achievement_points: int = db.Column(db.Integer)
+  covenant: str = db.Column(db.String(32))
+  renown_level: int = db.Column(db.Integer)
+  mythic_rio: float = db.Column(db.Float)
+
+
   UniqueConstraint(player_id, guild_id)
 
   def __init__(self, char_dict, guild_id, last_modified):
@@ -146,23 +154,29 @@ class Character_equipmentQuery(object):
 @dataclass
 class Character_dungeon(db.Model):
   dungeon_id: int = db.Column(db.Integer, primary_key=True)
-  dungeon_period: int = db.Column(db.Integer, primary_key=True)
+  dungeon_type: str = db.Column(db.String(128), primary_key=True)
+  completed_at: str = db.Column(db.String(128), primary_key=True)
   player_id: int = db.Column(db.Integer, db.ForeignKey('guild_player.player_id'), primary_key=True)
   player_dungeon = db.relationship("Guild_player", back_populates="dungeon", foreign_keys=[player_id])
 
-  intime: bool = db.Column(db.Boolean)
+  keystone_upgrades: int = db.Column(db.Integer)
   dungeon: str = db.Column(db.String(128))
+  dungeon_short: str = db.Column(db.String(16))
   keystone_level: int = db.Column(db.Integer)
   duration: int = db.Column(db.Integer)
+  score: float = db.Column(db.Float)
 
-  def __init__(self, dungeon_dict):
-    self.player_id = dungeon_dict['player_id']
-    self.dungeon_period = dungeon_dict['dungeon_period']
+  def __init__(self, player_id, dungeon_dict):
+    self.player_id = player_id
+    self.dungeon_type = dungeon_dict['dungeon_type']
     self.dungeon_id = dungeon_dict['dungeon_id']
-    self.intime = dungeon_dict['intime']
+    self.keystone_upgrades = dungeon_dict['keystone_upgrades']
     self.dungeon = dungeon_dict['dungeon']
+    self.dungeon_short = dungeon_dict['dungeon_short']
     self.keystone_level = dungeon_dict['keystone_level']
     self.duration = dungeon_dict['duration']
+    self.score = dungeon_dict['score']
+    self.completed_at = dungeon_dict['completed_at']
 
 class Character_dungeonQuery(object):
   @staticmethod

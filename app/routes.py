@@ -42,11 +42,16 @@ def get_player_dungeon_from_guild(realm, guild):
     for char in character:
       container = dict()
       container['best'] = 0
+      container['total'] = 0
       container['char_id'] = char['char_id']
 
       for dungeon in char['dungeon_list']:
-        if container['best'] < dungeon.keystone_level:
-          container['best'] = dungeon.keystone_level
+        if dungeon.dungeon_type == 'weekly':
+          if container['best'] < dungeon.keystone_level:
+            container['best'] = dungeon.keystone_level
+        if dungeon.dungeon_type == 'highest':
+          if container['total'] < dungeon.keystone_level:
+            container['total'] = dungeon.keystone_level
       
       result.append(container)
 
@@ -209,10 +214,17 @@ def refresh_guild_roster(guild_roster, guild_id, token):
     ### End of Gear
 
     ### Dungeons
-    dungeons = update_character_mythic_plus(char['realm'], char['name'], token)
-    if dungeons is not None:
+    rio_char, dungeons = get_character_data(char['realm'], char['name'])
+    if rio_char is not None:
+      player.active_spec_name = rio_char['active_spec_name']
+      player.active_spec_role = rio_char['active_spec_role']
+      player.achievement_points = rio_char['achievement_points']
+      player.covenant = rio_char['covenant']
+      player.mythic_rio = rio_char['mythic_rio']
+      player.renown_level = rio_char['renown_level']
+
       for dungeon in dungeons:
-        dung = Character_dungeon(dungeon)
+        dung = Character_dungeon(char['id'], dungeon)
         db.session.add(dung)
 
     ### End of Dungeons
@@ -332,7 +344,9 @@ def update_character_equipment(realm, character, token):
 
   return (items, convert_datetime(response.headers['Last-Modified']))
 
+
 def update_character_mythic_plus(realm, character, token):
+  ''' Currently not used anymore since the raider.io api offers more and better values for the same data with less aggregation '''
   response = requests.get(f'https://eu.api.blizzard.com/profile/wow/character/{realm}/{character.lower()}/mythic-keystone-profile?namespace=profile-eu&locale=de_DE&access_token={token}')
   res = response.json()
 
@@ -376,5 +390,62 @@ def update_character_collection_mounts(realm, character, token):
     result.append(data)
 
   return result
+
+#endregion
+
+#region RaiderIO
+def create_dungeon_list(dungeon_list, dungeon_type):
+  list_runs = []
+  for run in dungeon_list:
+    run_dict = dict()
+    run_dict['dungeon'] = run['dungeon']
+    run_dict['dungeon_short'] = run['short_name']
+    run_dict['keystone_level'] = run['mythic_level']
+    run_dict['duration'] = run['clear_time_ms']
+    run_dict['keystone_upgrades'] = run['num_keystone_upgrades']
+    run_dict['dungeon_id'] = run['map_challenge_mode_id']
+    run_dict['score'] = run['score']
+    run_dict['completed_at'] = run['completed_at']
+    run_dict['dungeon_type'] = dungeon_type
+    list_runs.append(run_dict)      
+  
+  return list_runs
+
+
+def get_character_data(realm, name):
+  response = requests.get(f'https://raider.io/api/v1/characters/profile?region=eu&realm={realm}&name={name}&fields=covenant%2Craid_progression%2Cmythic_plus_scores_by_season%3Acurrent%2Cmythic_plus_ranks%2Cmythic_plus_recent_runs%2Cmythic_plus_highest_level_runs%2Cmythic_plus_weekly_highest_level_runs')
+  res = response.json()
+
+  char = dict()
+  if 'name' not in res:
+    return (None, None)
+
+  print(name)
+
+  char['active_spec_name'] = res['active_spec_name']
+  char['active_spec_role'] = res['active_spec_role']
+  char['achievement_points'] = res['achievement_points']
+  if res['covenant'] is not None:
+    char['covenant'] = res['covenant']['name']
+    char['renown_level'] = res['covenant']['renown_level']
+  else:
+    char['covenant'] = '-'
+    char['renown_level'] = 0
+   
+
+  if 'mythic_plus_scores_by_season' in res:
+    char['mythic_rio'] = res['mythic_plus_scores_by_season'][0]['scores']['all']
+  
+  dungeons = []
+  if 'mythic_plus_recent_runs' in res:
+    dungeons.extend(create_dungeon_list(res['mythic_plus_recent_runs'], 'recent'))
+
+  if 'mythic_plus_highest_level_runs' in res:
+    dungeons.extend(create_dungeon_list(res['mythic_plus_highest_level_runs'], 'highest'))
+
+  if 'mythic_plus_weekly_highest_level_runs' in res:
+    dungeons.extend(create_dungeon_list(res['mythic_plus_weekly_highest_level_runs'], 'weekly'))
+
+  return (char, dungeons)
 
 #endregion
