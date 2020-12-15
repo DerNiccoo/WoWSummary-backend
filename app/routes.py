@@ -9,7 +9,7 @@ from datetime import datetime
 import datetime
 
 classes = ['warrior', 'paladin', 'hunter', 'rogue', 'prist', 'death-knight', 'shaman', 'mage', 'warlock', 'monk', 'druid', 'demon-hunter']
-refresh_interval = 5 * 60
+refresh_interval = 4 * 60
 
 @app.route("/guild/<string:realm>/<string:guild>")
 def get_guild(realm, guild):
@@ -19,7 +19,6 @@ def get_guild(realm, guild):
     return make_response('Guild not found', 404)
   else:
     return make_response(jsonify(guild), 200)
-
 
 @app.route("/guild/<string:realm>/<string:guild>/roster")
 def get_player_from_guild(realm, guild):
@@ -187,6 +186,7 @@ def find_char_in_guild_character(guild_character, char):
 
 def refresh_guild_roster(guild_roster, guild_id, token):
   guild_character = Guild_playerQuery.get_all_guild_id_player(guild_id)
+  updated = 0
 
   for char in guild_roster:
     gear_data, char_last_modified = update_character_equipment(char['realm'], char['name'], token)
@@ -200,6 +200,7 @@ def refresh_guild_roster(guild_roster, guild_id, token):
       continue
       # db.session.delete(stored_char) DEBUG
     elif stored_char is not None and stored_char.last_modified + refresh_interval < char_last_modified: # An dem Char hat sich etwas geändert, wir müssen ALLES dazugehörige löschen!
+      updated += 1
       db.session.delete(stored_char)
 
     player = Guild_player(char, guild_id, char_last_modified)
@@ -239,9 +240,16 @@ def refresh_guild_roster(guild_roster, guild_id, token):
     db.session.add(player)
 
   db.session.commit()
+  print(f'Updated {updated} Player')
+  return updated
 
 @app.route("/refresh")
 def refresh_everything():
+  guild = GuildQuery.get_guild('blackrock', 'shockwave')
+
+  if guild is not None and guild.last_modified + refresh_interval > datetime.datetime.now().timestamp():
+    return make_response(jsonify(action='To early to refresh'), 200)
+
   body = 'grant_type=client_credentials'
   header = {'Content-Type': 'application/x-www-form-urlencoded',}
   response = requests.post('https://eu.battle.net/oauth/token', data=body, headers=header, auth=HTTPBasicAuth(app.config['BLIZZ_CLIENT_ID'], app.config['BLIZZ_CLIENT_SECRET']))
@@ -252,23 +260,9 @@ def refresh_everything():
   last_modified = GuildQuery.get_last_modified(guild_roster['guild']['id'])
 
   refresh_guild(guild_roster['guild'], guild_roster_lm, last_modified)
-  refresh_guild_roster(guild_roster['character'], guild_roster['guild']['id'], access_token)   #guild_roster['guild']['id'], guild_roster_lm, 0)#last_modified)
+  player_updated = refresh_guild_roster(guild_roster['character'], guild_roster['guild']['id'], access_token)   #guild_roster['guild']['id'], guild_roster_lm, 0)#last_modified)
 
-
-
-
-
-
-
-
-  # Schauen ob Gilde bereits vorhanden, wenn ja:
-  # Vergleichen, ob LM größer als der in DB ist
-  # Wenn ja: Updaten! (Gilden Meta infos)
-  # Updaten Spieler: Loopen, Schauen ob ID existiert, wenn ja einfach alle roster Daten überschreiben, wenn ID nicht existiert, neu anlegen mit LM = 0 (maybe guter default wert?)
-  # 
-  # Spieler Updaten: Loopen über alle Spieler, mini call machen um LM zu erhalten, mit dem im Spieler abgleichen. Wenn neuer -> Alle Spieler Endpunkte updaten!
-
-  return make_response(guild_roster, 200)
+  return make_response(jsonify(action='Success', updated=player_updated), 200)
 
 def convert_datetime(date_time_str):
   return int(datetime.datetime.strptime(date_time_str, '%a, %d %b %Y %H:%M:%S %Z').timestamp())
@@ -419,8 +413,6 @@ def get_character_data(realm, name):
   char = dict()
   if 'name' not in res:
     return (None, None)
-
-  print(name)
 
   char['active_spec_name'] = res['active_spec_name']
   char['active_spec_role'] = res['active_spec_role']
