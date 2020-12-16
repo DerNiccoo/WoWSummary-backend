@@ -38,8 +38,7 @@ class GuildQuery(object):
     guild = Guild.query.filter(Guild.guild_id == guild_new.guild_id).first()
     guild.realm = guild_new.realm
     guild.faction = guild_new.faction
-    guild.last_modified = guild_new.last_modified
-    db.session.commit()
+    guild.last_modified = guild_new.last_modified # No commit here, so that the full REFRESH will be commited in one step
     return True
 
 @dataclass

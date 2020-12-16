@@ -173,7 +173,6 @@ def refresh_guild(guild_data, last_modified, recorded_modified):
   if recorded_modified == 0: # INSERT INTO
     guild = Guild(guild_data['id'], guild_data['realm'], guild_data['name'], guild_data['faction'], last_modified)
     db.session.add(guild)
-    db.session.commit()
   elif recorded_modified + refresh_interval < last_modified: # UPDATE
     guild = Guild(guild_data['id'], guild_data['realm'], guild_data['name'], guild_data['faction'], last_modified)
     GuildQuery.update_guild(guild)
@@ -197,11 +196,14 @@ def refresh_guild_roster(guild_roster, guild_id, token):
     stored_char = find_char_in_guild_character(guild_character, char)
 
     if stored_char is not None and stored_char.last_modified + refresh_interval  >= char_last_modified: # An dem Char hat sich nix geändert, wir brauchen keine weiteren calls mehr zu machen!
+      print(f"skipping {char['name']}")
       continue
       # db.session.delete(stored_char) DEBUG
     elif stored_char is not None and stored_char.last_modified + refresh_interval < char_last_modified: # An dem Char hat sich etwas geändert, wir müssen ALLES dazugehörige löschen!
+      print(f"updating {char['name']}")
       updated += 1
       db.session.delete(stored_char)
+
 
     player = Guild_player(char, guild_id, char_last_modified)
     #### das davor sollte für alle Endpunkt gleich bleiben, es folgen "nur noch" das erneuern der anderen Endpunkte
