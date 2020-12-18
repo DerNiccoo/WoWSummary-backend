@@ -1,6 +1,6 @@
 from app import app
 from app import db
-from app.models import Guild, GuildQuery, Guild_player, Guild_playerQuery, Character_equipment, Character_equipmentQuery, Character_dungeon, Character_dungeonQuery, Character_mount, Character_mountQuery
+from app.models import Guild, GuildQuery, Guild_player, Guild_playerQuery, Character_equipment, Character_equipmentQuery, Character_dungeon, Character_dungeonQuery, Character_mount, Character_mountQuery, Character_pvp, Character_pvpQuery
 from flask import Flask, render_template, redirect, request, jsonify, make_response
 
 import requests
@@ -10,6 +10,11 @@ import datetime
 
 classes = ['warrior', 'paladin', 'hunter', 'rogue', 'prist', 'death-knight', 'shaman', 'mage', 'warlock', 'monk', 'druid', 'demon-hunter']
 refresh_interval = 4 * 60
+
+debug = False
+
+if debug:
+  refresh_interval = 0
 
 @app.route("/guild/<string:realm>/<string:guild>")
 def get_guild(realm, guild):
@@ -79,6 +84,26 @@ def get_player_mounts_from_guild(realm, guild):
       result.append(container)
 
     return make_response(jsonify(result), 200)
+
+@app.route("/guild/<string:realm>/<string:guild>/pvp/overview")
+def get_player_pvp_from_guild(realm, guild):
+  character = Character_pvpQuery.get_pvp_from_guild_player(realm, guild)
+  
+  if character == None or len(character) == 0:
+    return make_response('No Character found', 404)
+  else:
+    result = []
+
+    for char in character:
+      container = dict()
+      container['char_id'] = char['char_id']
+      container['pvp'] = char['pvp_list']
+      
+      result.append(container)
+
+    return make_response(jsonify(result), 200)
+
+
 
 #region Gear Sektion
 
@@ -185,6 +210,10 @@ def find_char_in_guild_character(guild_character, char):
 
 def refresh_guild_roster(guild_roster, guild_id, token):
   guild_character = Guild_playerQuery.get_all_guild_id_player(guild_id)
+  
+  if guild_character is None:
+    return -1
+
   updated = 0
 
   for char in guild_roster:
@@ -195,7 +224,12 @@ def refresh_guild_roster(guild_roster, guild_id, token):
 
     stored_char = find_char_in_guild_character(guild_character, char)
 
-    if stored_char is not None and stored_char.last_modified + refresh_interval  >= char_last_modified: # An dem Char hat sich nix geändert, wir brauchen keine weiteren calls mehr zu machen!
+    if debug and stored_char is not None and stored_char.name == 'Broxger':
+      print(f"updating {char['name']}")
+      updated += 1
+      db.session.delete(stored_char)
+
+    elif stored_char is not None and stored_char.last_modified + refresh_interval  >= char_last_modified: # An dem Char hat sich nix geändert, wir brauchen keine weiteren calls mehr zu machen!
       print(f"skipping {char['name']}")
       continue
       # db.session.delete(stored_char) DEBUG
@@ -225,6 +259,10 @@ def refresh_guild_roster(guild_roster, guild_id, token):
       player.covenant = rio_char['covenant']
       player.mythic_rio = rio_char['mythic_rio']
       player.renown_level = rio_char['renown_level']
+      player.raid_summary = rio_char['raid_summary']
+      player.normal_bosses = rio_char['normal_bosses']
+      player.heroic_bosses = rio_char['heroic_bosses']
+      player.mythic_bosses = rio_char['mythic_bosses']
 
       for dungeon in dungeons:
         dung = Character_dungeon(char['id'], dungeon)
@@ -238,6 +276,14 @@ def refresh_guild_roster(guild_roster, guild_id, token):
         horse = Character_mount(char['id'], mount)
         db.session.add(horse)
     ### End of Collection Mounts
+
+    ### PvP
+    pvp = update_character_pvp(char['realm'], char['name'], token)
+    if pvp is not None:
+      for p in pvp:
+        char_pvp = Character_pvp(char['id'], p)
+        db.session.add(char_pvp)
+    ### End of PvP
 
     db.session.add(player)
 
@@ -274,7 +320,13 @@ def convert_datetime(date_time_str):
 def update_guild_roster(realm, name, token):
   response = requests.get(f'https://eu.api.blizzard.com/data/wow/guild/{realm}/{name}/roster?namespace=profile-eu&locale=de_DE&access_token={token}')
 
-  res = response.json()
+  res = ''
+
+  try:
+    res = response.json()
+  except:
+    print('error with json: ' + res)
+    return (None, None)
 
   data = { 'guild': {'name': '', 'id': '', 'realm': '' , 'faction': ''}, 'character': '' }
   data['guild']['name'] = res['guild']['name']
@@ -305,7 +357,14 @@ def update_guild_roster(realm, name, token):
 def update_character_equipment(realm, character, token):
   response = requests.get(f'https://eu.api.blizzard.com/profile/wow/character/{realm}/{character.lower()}/equipment?namespace=profile-eu&locale=de_DE&access_token={token}')
 
-  res = response.json()
+  res = ''
+
+  try:
+    res = response.json()
+  except:
+    print('error with json: ' + res)
+    return (None, None)
+
   items = []
 
   if not 'equipped_items' in res:
@@ -344,7 +403,14 @@ def update_character_equipment(realm, character, token):
 def update_character_mythic_plus(realm, character, token):
   ''' Currently not used anymore since the raider.io api offers more and better values for the same data with less aggregation '''
   response = requests.get(f'https://eu.api.blizzard.com/profile/wow/character/{realm}/{character.lower()}/mythic-keystone-profile?namespace=profile-eu&locale=de_DE&access_token={token}')
-  res = response.json()
+
+  res = ''
+
+  try:
+    res = response.json()
+  except:
+    print('error with json: ' + res)
+    return None
 
   if 'current_period' not in res:
     return None
@@ -368,7 +434,14 @@ def update_character_mythic_plus(realm, character, token):
 
 def update_character_collection_mounts(realm, character, token):
   response = requests.get(f'https://eu.api.blizzard.com/profile/wow/character/{realm}/{character.lower()}/collections/mounts?namespace=profile-eu&locale=de_DE&access_token={token}')
-  res = response.json()
+  
+  res = ''
+
+  try:
+    res = response.json()
+  except:
+    print('error with json: ' + res)
+    return None
 
   if 'mounts' not in res:
     return None
@@ -383,6 +456,35 @@ def update_character_collection_mounts(realm, character, token):
     data['name'] = iteration['mount']['name']
     data['mount_id'] = iteration['mount']['id']
     data['useable'] = iteration['is_useable']
+    result.append(data)
+
+  return result
+
+def update_character_pvp(realm, character, token):
+  brackets = ['2v2', '3v3']
+
+  result = []
+  for bracket in brackets:
+    response = requests.get(f'https://eu.api.blizzard.com/profile/wow/character/{realm}/{character.lower()}/pvp-bracket/{bracket}?namespace=profile-eu&locale=de_DE&access_token={token}')
+    res = ''
+
+    try:
+      res = response.json()
+    except:
+      print('error with json: ' + res)
+      return None
+    
+    if 'rating' not in res:
+      return None
+
+    data = dict()
+    data['pvp_type'] = res['bracket']['type']
+    data['season'] = res['season']['id']
+    data['rating'] = res['rating']
+    data['season_won'] = res['season_match_statistics']['won']
+    data['season_lost'] = res['season_match_statistics']['lost']
+    data['weekly_won'] = res['weekly_match_statistics']['won']
+    data['weekly_lost'] = res['weekly_match_statistics']['lost']
     result.append(data)
 
   return result
@@ -416,6 +518,13 @@ def get_character_data(realm, name):
   if 'name' not in res:
     return (None, None)
 
+  curr_raid = list(res['raid_progression'].values())[0]
+  print(curr_raid)
+
+  char['raid_summary'] = curr_raid['summary']
+  char['normal_bosses'] = curr_raid['normal_bosses_killed']
+  char['heroic_bosses'] = curr_raid['heroic_bosses_killed']
+  char['mythic_bosses'] = curr_raid['mythic_bosses_killed']
   char['active_spec_name'] = res['active_spec_name']
   char['active_spec_role'] = res['active_spec_role']
   char['achievement_points'] = res['achievement_points']

@@ -49,6 +49,7 @@ class Guild_player(db.Model):
   gear = db.relationship("Character_equipment", back_populates="player_gear", cascade="all, delete")
   dungeon = db.relationship("Character_dungeon", back_populates="player_dungeon", cascade="all, delete")
   mount = db.relationship("Character_mount", back_populates="player_mount", cascade="all, delete")
+  pvp = db.relationship("Character_pvp", back_populates="player_pvp", cascade="all, delete")
   name: str = db.Column(db.String(32), index=True)
   level: int = db.Column(db.Integer)
   playable_class: str = db.Column(db.String(32))
@@ -62,6 +63,10 @@ class Guild_player(db.Model):
   covenant: str = db.Column(db.String(32))
   renown_level: int = db.Column(db.Integer)
   mythic_rio: float = db.Column(db.Float)
+  raid_summary: str = db.Column(db.String(32))
+  normal_bosses: int = db.Column(db.Integer)
+  heroic_bosses: int = db.Column(db.Integer)
+  mythic_bosses: int = db.Column(db.Integer)
 
 
   UniqueConstraint(player_id, guild_id)
@@ -213,5 +218,52 @@ class Character_mountQuery(object):
     for char in character:
       mount_list = Character_mount.query.filter(Character_mount.player_id == char.player_id).all()
       res.append({'name': char.name, 'char_id': char.player_id, 'class': char.playable_class, 'gear_score': char.gear_score, 'mount_list': mount_list})
+
+    return res
+
+  @staticmethod
+  def get_mounts_from_player(realm, name):
+    mount_list = Character_mount.query\
+      .join(Guild_player, Guild_player.player_id == Character_mount.player_id)\
+      .filter(Guild_player.name.ilike(name))\
+      .filter(Guild_player.realm.ilike(realm))\
+      .all()
+    
+    return mount_list
+
+@dataclass
+class Character_pvp(db.Model):
+  player_id: int = db.Column(db.Integer, db.ForeignKey('guild_player.player_id'), primary_key=True)
+  player_pvp = db.relationship("Guild_player", back_populates="pvp", foreign_keys=[player_id])
+  pvp_type: str = db.Column(db.String(64), primary_key=True)
+  season: int = db.Column(db.Integer)
+  rating: int = db.Column(db.Integer)
+  season_won: int = db.Column(db.Integer)
+  season_lost: int = db.Column(db.Integer)
+  weekly_won: int = db.Column(db.Integer)
+  weekly_lost: int = db.Column(db.Integer)
+
+  def __init__(self, player_id, mount_dict):
+    self.player_id = player_id
+    self.pvp_type = mount_dict['pvp_type']
+    self.season = mount_dict['season']
+    self.rating = mount_dict['rating']
+    self.season_won = mount_dict['season_won']
+    self.season_lost = mount_dict['season_lost']
+    self.weekly_won = mount_dict['weekly_won']
+    self.weekly_lost = mount_dict['weekly_lost']
+
+class Character_pvpQuery(object):
+  @staticmethod
+  def get_pvp_from_guild_player(realm, guild):
+    character = Guild_playerQuery.get_all_guild_player(realm, guild)
+
+    res = []
+    for char in character:
+      pvp_list = Character_pvp.query\
+        .filter(Character_pvp.player_id == char.player_id)\
+        .filter(Character_pvp.season >= 29)\
+        .all()
+      res.append({'name': char.name, 'char_id': char.player_id, 'class': char.playable_class, 'gear_score': char.gear_score, 'pvp_list': pvp_list})
 
     return res
